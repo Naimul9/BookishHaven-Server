@@ -6,7 +6,6 @@ const port = process.env.PORT || 5000;
 
 const app = express();
 
-// CORS configuration
 const corsOptions = {
   origin: ['http://localhost:5173'],
   credentials: true,
@@ -16,10 +15,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ahphq0t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with MongoClientOptions to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -30,12 +27,11 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    // Connect to the MongoDB cluster
-    await client.connect();
 
     const booksCollection = client.db('BookishHaven').collection('Books');
+    const borrowsCollection = client.db('BookishHaven').collection('Borrows');
 
-    // Get all books or books by category
+
     app.get('/books', async (req, res) => {
       try {
         const category = req.query.Category;
@@ -47,23 +43,44 @@ async function run() {
       }
     });
 
-    // add Books
-    app.post('/addBook', async(req, res)=>{
-        const info =req.body
-        console.log(info)
-        const result =await booksCollection.insertOne(info)
-        res.send(result)
-      })
+    // add book
+    app.post('/addBook', async (req, res) => {
+      const info = req.body;
+      console.log(info);
+      const result = await booksCollection.insertOne(info);
+      res.send(result);
+    });
 
-    //   get detail by id
-    app.get('/books/:id', async(req,res)=>{
-        const id =req.params.id
-        const query ={_id: new ObjectId(id)}
-        const result =await booksCollection.findOne(query)
-        res.send(result)
-      })
+    // get book by id
+    app.get('/books/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await booksCollection.findOne(query);
+      res.send(result);
+    });
 
-    // Ping to confirm a successful connection
+// update book
+app.put('/books/:id', async(req,res)=>{
+    const id = req.params.id
+    const filter ={_id: new ObjectId(id)}
+    const options ={upsert:true}
+    const updatedBook = req.body
+    const book = {
+      $set:{
+        image:updatedBook.image, 
+      name:updatedBook.name, 
+      Category: updatedBook.Category,
+      rating: updatedBook.rating, 
+      authorName: updatedBook.authorName, 
+      }
+    }
+    const result =await booksCollection.updateOne(filter, book, options )
+    res.send(result)
+  })
+
+
+   
+
     await client.db('admin').command({ ping: 1 });
     console.log('Pinged your deployment. You successfully connected to MongoDB!');
   } catch (error) {
@@ -73,10 +90,8 @@ async function run() {
 
 run().catch(console.dir);
 
-// Default route
 app.get('/', (req, res) => {
   res.send('Hello from Bookish Haven');
 });
 
-// Start the server
 app.listen(port, () => console.log(`Server running on port ${port}`));
