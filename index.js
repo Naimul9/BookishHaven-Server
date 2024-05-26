@@ -71,6 +71,42 @@ app.get('/logout', (req,res)=>{
   };
 
 
+// Return a borrowed book
+app.post('/return-book/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Find the borrowed book by ID
+        const borrowedBook = await borrowsCollection.findOne({ _id: new ObjectId(id) });
+        if (!borrowedBook) {
+            return res.status(404).send({ message: 'Borrowed book not found' });
+        }
+
+        // Find the book by ID to update its quantity
+        const book = await booksCollection.findOne({ _id: new ObjectId(borrowedBook.bookId) });
+        if (!book) {
+            return res.status(404).send({ message: 'Book not found' });
+        }
+
+        // Update the quantity of the book
+        const updatedQuantity = book.quantity + 1;
+        await booksCollection.updateOne(
+            { _id: new ObjectId(borrowedBook.bookId) },
+            { $set: { quantity: updatedQuantity } }
+        );
+
+        // Remove the borrowed book from the borrowsCollection
+        await borrowsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        res.send({ message: 'Book returned successfully' });
+    } catch (error) {
+        console.error('Error returning book:', error);
+        res.status(500).send({ message: 'Failed to return the book', error });
+    }
+});
+
+
+
+
   // Get borrowed books by user's email
 app.get('/borrowed-books/:email', async (req, res) => {
     const email = req.params.email
@@ -87,6 +123,15 @@ app.get('/borrowed-books/:email', async (req, res) => {
     try {
       const { bookId, returnDate, userName, userEmail,   image, 
         name, authorName,rating, Category } = req.body;
+
+
+  // Check if the user has already borrowed the book
+  const alreadyBorrowed = await borrowsCollection.findOne({ bookId: new ObjectId(bookId), userEmail });
+  if (alreadyBorrowed) {
+      return res.status(400).send({ message: 'You have already borrowed this book' });
+  }
+
+
 
       // Find the book by ID
       const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
