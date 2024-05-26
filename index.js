@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken')
+const cookieParser = require('cookie-parser')
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 5000;
@@ -7,13 +9,14 @@ const port = process.env.PORT || 5000;
 const app = express();
 
 const corsOptions = {
-  origin: ['http://localhost:5173'],
+  origin: ['http://localhost:5173','http://localhost:5174'],
   credentials: true,
   optionSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(cookieParser())
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ahphq0t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -31,20 +34,125 @@ async function run() {
     const booksCollection = client.db('BookishHaven').collection('Books');
     const borrowsCollection = client.db('BookishHaven').collection('Borrows');
 
+// jwt generate
+app.post('/jwt', async(req,res)=>{
+const user = req.body
+const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET,{expiresIn:'365d'})
+res.cookie('token', token,{
+    httpOnly: true,
+    secure: true,
+    secure: process.env.NODE_ENV ==='production',
+    sameSite: process.env.NODE_ENV==='production'? 'none' : 'strict',
+}).send({success: true})
+})
 
-    app.get('/books', async (req, res) => {
-      try {
+// clear token
+app.get('/logout', (req,res)=>{
+    res.clearCookie('token',{
+        httpOnly:true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict', maxAge:0
+    })
+    .send({success: true})
+})
+
+
+ // Middleware function to verify JWT token
+ const verifyToken = (req, res, next) => {
+    const token = req.cookies.token;
+    console.log(token);
+    if (!token) return res.status(401).send({ message: 'Unauthorized' });
+
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+      if (err) return res.status(403).send({ message: 'Forbidden' });
+      req.user = decoded;
+      next();
+    });
+  };
+
+
+  // Get borrowed books by user's email
+app.get('/borrowed-books/:email', async (req, res) => {
+    const email = req.params.email
+    const query = {userEmail : email }
+    const result = await borrowsCollection.find(query).toArray()
+    res.send(result)
+});
+
+
+
+
+   // Borrow a book
+   app.post('/borrow', async (req, res) => {
+    try {
+      const { bookId, returnDate, userName, userEmail,   image, 
+        name, authorName,rating, Category } = req.body;
+
+      // Find the book by ID
+      const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
+
+      if (!book) {
+        return res.status(404).send({ message: 'Book not found' });
+      }
+
+      if (book.quantity === 0) {
+        return res.status(400).send({ message: 'Book out of stock' });
+      }
+
+      // Update the quantity of the book
+      const updatedQuantity = book.quantity - 1;
+      await booksCollection.updateOne(
+        { _id: new ObjectId(bookId) },
+        { $set: { quantity: updatedQuantity } }
+      );
+
+      // Add the borrow record to borrowsCollection
+      const borrowRecord = {
+        image, 
+        name,
+         authorName,
+        rating,
+        Category,
+        userName,
+        userEmail,
+        bookId,
+        returnDate,
+        borrowedDate: new Date(),
+      };
+      const result = await borrowsCollection.insertOne(borrowRecord);
+
+      res.send(result);
+    } catch (error) {
+      res.status(500).send({ message: 'Failed to borrow the book', error });
+    }
+  });
+
+  // Get all books with token verification
+  app.get('/books', verifyToken, async (req, res) => {
+    try {
+      const result = await booksCollection.find({}).toArray();
+      res.send(result);
+    } catch (error) {
+      res.status(500).send({ message: 'Failed to fetch books', error });
+    }
+  });
+
+
+
+// Get books by category
+app.get('/books/category', async (req, res) => {
+    try {
         const category = req.query.Category;
         const query = category ? { Category: category } : {};
         const result = await booksCollection.find(query).toArray();
         res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: 'Failed to fetch books', error });
-      }
-    });
+    } catch (error) {
+        res.status(500).send({ message: 'Failed to fetch books by category', error });
+    }
+});
 
     // add book
-    app.post('/addBook', async (req, res) => {
+    app.post('/addBook',  async (req, res) => {
       const info = req.body;
       console.log(info);
       const result = await booksCollection.insertOne(info);
